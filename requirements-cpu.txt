@@ -1,0 +1,12 @@
+# Same as requirements.txt, but with the CPU-only build of PyTorch. This is the base of the installer:
+# it runs on any computer (AMD, Intel, no GPU). NVIDIA users get the CUDA parts added by the installer.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0+cpu
+torchaudio==2.11.0+cpu
+demucs==4.1.0
+librosa==1.0.1
+numpy==2.5.5
+soundfile==0.14.0
+PySide6==6.12.0
+pytest==9.2.0
+pyinstaller==6.22.3

@@ -1,0 +1,8 @@
+﻿TA GBA monothai_MAX
+Designer: Taweechai Assawarangsitsang (TA Font)
+Source: https://www.f0nt.com/release/ta-gba-monothai-max-ta-gba-monothai-mini/
+License: SIL Open Font License 1.1 (see OFL.txt in this folder)
+
+The font file is used unmodified. It is bundled with Wihok under OFL condition 2,
+which requires each copy to carry the copyright notice and the license; both are in
+OFL.txt. The font is not sold by itself.
