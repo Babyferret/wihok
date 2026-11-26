@@ -74,6 +74,15 @@ QFrame#dropzone {{
 }}
 QFrame#dropzone[dragging="true"] {{ background: {p.tint_hover}; border-color: {p.accent}; }}
 
+QFrame#update-bar {{
+    background: {p.tint_hover};
+    border: 1px solid {p.dashed};
+    border-radius: 12px;
+}}
+QFrame#update-bar QLabel[kind="error"] {{ color: {p.error}; }}
+QFrame#update-bar QProgressBar {{ background: {p.groove}; }}
+QLabel#version-text {{ color: {p.muted}; font-size: 16px; }}
+
 QFrame#results {{
     background: {p.surface};
     border: 1px solid {p.line};
@@ -141,6 +150,9 @@ QComboBox {{
 QComboBox#key-select {{ font-size: 32px; padding: 2px 12px; }}
 QComboBox#lang-select {{ padding: 2px 8px; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox#key-select[locked="true"] {{ border-color: transparent; background: transparent; }}
+QComboBox#key-select[locked="true"]::drop-down {{ width: 0; }}
+QComboBox#key-select[locked="true"]::down-arrow {{ image: none; width: 0; }}
 QComboBox QAbstractItemView {{
     background: {p.surface};
     color: {p.text};
@@ -148,6 +160,12 @@ QComboBox QAbstractItemView {{
     selection-color: {p.on_pink};
     border: 1px solid {p.line};
 }}
+
+QMenu {{ background: {p.surface}; color: {p.text}; border: 1px solid {p.line}; padding: 4px; }}
+QMenu::item {{ background: transparent; padding: 6px 24px 6px 12px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {p.pink}; color: {p.on_pink}; }}
+QMenu::item:disabled {{ color: {p.muted}; }}
+QMenu::separator {{ height: 1px; background: {p.line}; margin: 4px 8px; }}
 
 QScrollArea {{ border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}

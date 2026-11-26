@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from core.audio import FfmpegMissing
-from core.model import ModelDownloadFailed
+from core.model import ModelDownloadFailed, is_model_cached
 from core.pipeline import process_song
 from core.separator import OutOfGpuMemory, SeparationCancelled
 
@@ -21,9 +21,11 @@ class ProcessWorker(QThread):
     ffmpeg_missing = Signal()
     model_download_failed = Signal()
 
-    def __init__(self, song: Path, base: Path, device: str, cancel: threading.Event, parent=None):
+    def __init__(self, song: Path, base: Path, device: str, cancel: threading.Event,
+                 model_known: bool = False, parent=None):
         super().__init__(parent)
         self._song, self._base, self._device, self._cancel = song, base, device, cancel
+        self._model_known = model_known  # a separation already succeeded here, so the model is on this computer
 
     def run(self):
         try:
@@ -32,6 +34,7 @@ class ProcessWorker(QThread):
                 cancel=self._cancel,
                 on_stage=self.stage.emit,
                 on_notice=lambda _message: self.notice.emit(),
+                model_cached=lambda: self._model_known or is_model_cached(),
             )
         except SeparationCancelled:
             self.cancelled.emit()

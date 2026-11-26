@@ -9,16 +9,20 @@ from PySide6.QtWidgets import (
 )
 
 from core.analysis import NOTES
+from core.device import looks_cuda_capable, probe_device
 from ui.appearance import system_prefers_dark
 from ui.frameless import EdgeResizer
 from ui.player_panel import PlayerPanel
 from ui.strings import DEFAULT_LANGUAGE, LANGUAGES, tr
 from ui.theme import PALETTES, stylesheet
 from ui.title_bar import TitleBar
+from ui.update_bar import UpdateBar
+from ui.update_ui import UpdateUi
 from ui.worker import ProcessWorker
 
 SUPPORTED_SUFFIXES = {".mp3", ".wav", ".flac", ".m4a"}
 BPM_RANGE = (30.0, 300.0)  # the ÷2 and ×2 buttons stop at a tempo no song has
+SHOW_TUNING_CONTROLS = False  # ÷2 / ×2 and the key picker are built but kept out of sight until they are really used
 STAGE_KEYS = {
     "reusing": "reusing",
     "downloading_model": "downloading_model",
@@ -75,7 +79,9 @@ class DropZone(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, output_base: Path | None = None, device: str | None = None):
+    device_probed = Signal(str)
+
+    def __init__(self, output_base: Path | None = None, device: str | None = None, check_updates: bool = True):
         super().__init__()
         self.setWindowTitle("Wihok")  # still used by the taskbar even though the title bar is our own
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint)
@@ -89,7 +95,10 @@ class MainWindow(QMainWindow):
         self.theme_name = saved_theme if saved_theme in PALETTES else ("dark" if system_prefers_dark() else "light")
         music = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
         self.output_base = Path(output_base) if output_base else Path(music) / "Wihok"
-        self.device = device or _default_device()
+        # Importing torch here would keep hundreds of MB in memory for as long as the window is open. So guess from
+        # the files first, and let a short-lived second process confirm what PyTorch really sees.
+        self.device = device or ("cuda" if looks_cuda_capable() else "cpu")
+        self._probe_needed = device is None and self.device == "cuda"
 
         self._worker: ProcessWorker | None = None
         self._cancel = threading.Event()
@@ -98,10 +107,28 @@ class MainWindow(QMainWindow):
         self._status = ("cpu_mode" if self.device == "cpu" else "ready", "normal", {})
 
         self._build()
+        self.update_ui = UpdateUi(self, auto_check=check_updates)
         self._apply_theme(self.theme_name)
         self._retranslate()
         self._resizer = EdgeResizer(self)
         QApplication.instance().installEventFilter(self._resizer)
+        self.device_probed.connect(self._on_device_probed)
+        if self._probe_needed:
+            threading.Thread(target=self._probe_device, daemon=True).start()
+
+    def _probe_device(self):
+        device = probe_device()
+        try:
+            self.device_probed.emit(device)
+        except RuntimeError:  # the window was closed before the check finished
+            pass
+
+    def _on_device_probed(self, device: str):
+        if device == self.device:
+            return
+        self.device = device
+        if self._status[0] == "ready":
+            self._set_status("cpu_mode")
 
     # ---- layout -------------------------------------------------------
 
@@ -114,6 +141,9 @@ class MainWindow(QMainWindow):
         self.language_box = self.title_bar.language_box
         self.language_box.currentIndexChanged.connect(self._on_language_changed)
         self.title_bar.theme_button.clicked.connect(self._toggle_theme)
+
+        self.update_bar = UpdateBar()
+        root.addWidget(self.update_bar)
 
         self.drop_zone = DropZone()
         self.drop_zone.file_dropped.connect(self.start_processing)
@@ -190,6 +220,13 @@ class MainWindow(QMainWindow):
         bpm_buttons.addWidget(self.halve_button)
         bpm_buttons.addWidget(self.double_button)
         bpm_buttons.addStretch()
+        if not SHOW_TUNING_CONTROLS:
+            # the key stays on screen as a plain readout: not clickable, no arrow
+            self.halve_button.hide()
+            self.double_button.hide()
+            self.key_box.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.key_box.setFocusPolicy(Qt.NoFocus)
+            self.key_box.setProperty("locked", True)
 
         bpm_column = QVBoxLayout()
         bpm_column.setSpacing(4)
@@ -254,6 +291,7 @@ class MainWindow(QMainWindow):
         self.karaoke_caption.setText(t("karaoke"))
         self.acapella_caption.setText(t("acapella"))
         self.reset_button.setText(t("reset"))
+        self.update_ui.retranslate()
         self.player.retranslate(self.language)
         if self._done:
             self._refresh_numbers()
@@ -280,6 +318,7 @@ class MainWindow(QMainWindow):
         palette = PALETTES[name]
         self.setStyleSheet(stylesheet(palette))
         self.title_bar.apply_palette(palette)
+        self.update_ui.apply_palette(palette)
 
     def _toggle_theme(self):
         self._apply_theme("light" if self.theme_name == "dark" else "dark")
@@ -329,7 +368,10 @@ class MainWindow(QMainWindow):
         self.results.hide()
         self.player.clear()
         self._cancel = threading.Event()
-        worker = ProcessWorker(song, self.output_base, device or self.device, self._cancel, self)
+        # Remembered once a separation has worked, so the "downloading the model" notice never comes back,
+        # even if the cache check cannot see where the model was stored. Read here: QSettings stays on this thread.
+        model_known = self._settings.value("model_ready", False, type=bool)
+        worker = ProcessWorker(song, self.output_base, device or self.device, self._cancel, model_known, self)
         worker.stage.connect(self._on_stage)
         worker.notice.connect(lambda: self._set_status("retry_notice"))
         worker.succeeded.connect(self._on_succeeded)
@@ -352,6 +394,8 @@ class MainWindow(QMainWindow):
 
     def _on_succeeded(self, done):
         self._done = done
+        if not done.reused:
+            self._settings.setValue("model_ready", True)
         self._reset_edits()
         self.karaoke_name.setText(done.instrumental.name)
         self.acapella_name.setText(done.vocals.name)
@@ -422,6 +466,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         QApplication.instance().removeEventFilter(self._resizer)
+        self.update_ui.cancel()
         self.player.clear()
         if self.busy:
             self._cancel.set()
@@ -429,6 +474,3 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def _default_device() -> str:
-    import torch
-    return "cuda" if torch.cuda.is_available() else "cpu"

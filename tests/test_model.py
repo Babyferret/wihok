@@ -14,13 +14,46 @@ def _hf_cache(base, with_weights: bool = True):
     return base
 
 
+def _nothing_else(tmp_path):
+    """An empty stand-in for the older download location, so a test never sees this computer's real one."""
+    nowhere = tmp_path / "no-older-cache"
+    nowhere.mkdir()
+    return nowhere
+
+
 def test_the_model_counts_as_cached_when_its_description_and_weights_are_present(tmp_path):
-    assert is_model_cached(cache_dir=_hf_cache(tmp_path)) is True
+    cache = _hf_cache(tmp_path / "hf")
+    assert is_model_cached(cache_dir=cache, torch_checkpoints=_nothing_else(tmp_path)) is True
 
 
 def test_the_model_is_not_cached_when_the_weights_are_missing(tmp_path):
-    assert is_model_cached(cache_dir=_hf_cache(tmp_path, with_weights=False)) is False
+    cache = _hf_cache(tmp_path / "hf", with_weights=False)
+    assert is_model_cached(cache_dir=cache, torch_checkpoints=_nothing_else(tmp_path)) is False
 
 
 def test_the_model_is_not_cached_in_an_empty_cache(tmp_path):
-    assert is_model_cached(cache_dir=tmp_path) is False
+    (tmp_path / "hf").mkdir()
+    assert is_model_cached(cache_dir=tmp_path / "hf", torch_checkpoints=_nothing_else(tmp_path)) is False
+
+
+def test_trouble_reading_demucs_file_list_means_not_cached_not_a_crash(tmp_path, monkeypatch):
+    # e.g. a Demucs upgrade whose files.txt no longer lists a signature: the check must say "not cached" (the person
+    # sees the download notice) rather than abort the whole separation with an unrelated error.
+    def broken():
+        raise KeyError("a signature missing from files.txt")
+
+    monkeypatch.setattr("core.model._older_file_names", broken)
+    (tmp_path / "hf").mkdir()
+
+    assert is_model_cached(cache_dir=tmp_path / "hf", torch_checkpoints=_nothing_else(tmp_path)) is False
+
+
+def test_the_model_counts_as_cached_when_it_came_from_the_older_download_source(tmp_path):
+    # When Hugging Face cannot be reached, Demucs downloads the same model from Meta's server instead and
+    # keeps it under torch's checkpoints folder. 955717e8-8726e21a.th is its name in demucs/remote/files.txt.
+    older = tmp_path / "torch-checkpoints"
+    older.mkdir()
+    (older / "955717e8-8726e21a.th").write_bytes(b"weights")
+    (tmp_path / "hf").mkdir()
+
+    assert is_model_cached(cache_dir=tmp_path / "hf", torch_checkpoints=older) is True

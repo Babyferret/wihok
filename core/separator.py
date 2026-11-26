@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import sys
@@ -35,9 +36,12 @@ Runner = Callable[[list[str], threading.Event], RunOutcome]
 
 
 def run_demucs(cmd: list[str], cancel: threading.Event) -> RunOutcome:
+    # We read the output as UTF-8, so tell the process to write UTF-8. Left alone it uses the Windows
+    # code page (often cp1252), which cannot encode a Thai or Japanese file name and crashed Demucs.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     process = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",
+        text=True, encoding="utf-8", errors="replace", env=env,
     )
     while True:
         try:

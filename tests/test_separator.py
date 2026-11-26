@@ -125,6 +125,17 @@ def test_cancelling_removes_only_the_files_of_that_job(tmp_path):
     assert sorted(p.name for p in out_dir.iterdir()) == ["earlier-result.wav"]
 
 
+def test_the_demucs_process_can_print_any_file_name_whatever_the_windows_code_page(monkeypatch):
+    # Many PCs pipe Python's output through a legacy code page such as cp1252, which cannot encode a Thai or
+    # Japanese file name. Demucs prints the path of the song, so it crashed on such names.
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    command = [sys.executable, "-c", "print('Separated tracks will be stored in ไทย 日本語')"]
+
+    outcome = run_demucs(command, threading.Event())
+
+    assert outcome.returncode == 0, outcome.stderr
+
+
 def test_the_runner_kills_the_process_when_cancelled():
     cancel = threading.Event()
     threading.Timer(0.5, cancel.set).start()

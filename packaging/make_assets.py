@@ -101,10 +101,14 @@ def wizard_image(width: int, height: int, font_family: str) -> QImage:
 
 
 def small_image(size: int) -> QImage:
+    """The icon in the corner of the wizard's header. The wizard puts it flush against the top and right edges of
+    a white header, so the image is white with the icon inset: the margin is part of the picture."""
     image = QImage(size, size, QImage.Format_RGB32)
-    image.fill(QColor(CREAM))
+    image.fill(QColor("#FFFFFF"))
+    tile = round(size * 0.80)
+    margin = (size - tile) // 2
     painter = QPainter(image)
-    painter.drawImage(0, 0, render_svg(bird_svg(size), size))
+    painter.drawImage(margin, margin, render_svg(bird_svg(tile), tile))
     painter.end()
     return image
 

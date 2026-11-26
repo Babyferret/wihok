@@ -23,6 +23,15 @@ class IconButton(QAbstractButton):
         self._hover_bg = QColor("#EEEEEE")
         self._pressed_bg = QColor("#DDDDDD")
         self._hover_fg = QColor("#000000")
+        self._badge = False
+        self._badge_color = QColor("#D9708F")
+
+    def set_badge(self, on: bool, color: str | None = None):
+        """A small dot in the corner: something here wants the person's attention."""
+        self._badge = on
+        if color:
+            self._badge_color = QColor(color)
+        self.update()
 
     def set_kind(self, kind: str):
         self.kind = kind
@@ -68,6 +77,13 @@ class IconButton(QAbstractButton):
             bite.addEllipse(QPointF(c.x() + 3.5, c.y() - 3), 5.5, 5.5)
             painter.setPen(Qt.NoPen)
             painter.fillPath(moon.subtracted(bite), color)
+        elif self.kind == "update":  # an arrow going down into a tray
+            painter.drawLine(QPointF(c.x(), c.y() - 6), QPointF(c.x(), c.y() + 2))
+            arrow = QPainterPath(QPointF(c.x() - 4, c.y() - 2))
+            arrow.lineTo(c.x(), c.y() + 2)
+            arrow.lineTo(c.x() + 4, c.y() - 2)
+            painter.drawPath(arrow)
+            painter.drawLine(QPointF(c.x() - 6, c.y() + 6), QPointF(c.x() + 6, c.y() + 6))
         elif self.kind == "sun":
             painter.drawEllipse(c, 3.5, 3.5)
             for i in range(8):
@@ -76,6 +92,12 @@ class IconButton(QAbstractButton):
                 painter.rotate(i * 45)
                 painter.drawLine(QPointF(0, -6.5), QPointF(0, -8.5))
                 painter.restore()
+
+        if self._badge:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(self._badge_color)
+            painter.drawEllipse(QPointF(c.x() + 7, c.y() - 7), 3.5, 3.5)
+            painter.setBrush(Qt.NoBrush)
 
         if self.hasFocus():
             focus = QPen(self._fg, 1)
@@ -95,6 +117,8 @@ class TitleBar(QWidget):
         icon.setPixmap(load_svg_icon(ASSETS / "wihok.svg").pixmap(24, 24))
         title = QLabel("Wihok")
         title.setObjectName("title-text")
+        self.version_label = QLabel()
+        self.version_label.setObjectName("version-text")
 
         self.language_box = QComboBox()
         self.language_box.setObjectName("lang-select")
@@ -103,6 +127,7 @@ class TitleBar(QWidget):
             self.language_box.addItem(name, code)
         self.language_box.setCurrentIndex(self.language_box.findData(language))
 
+        self.update_button = IconButton("update", width=40)
         self.theme_button = IconButton("moon", width=40)
         self.minimize_button = IconButton("minimize")
         self.maximize_button = IconButton("maximize")
@@ -114,10 +139,12 @@ class TitleBar(QWidget):
         layout.addWidget(icon)
         layout.addSpacing(8)
         layout.addWidget(title)
+        layout.addSpacing(8)
+        layout.addWidget(self.version_label)
         layout.addStretch()
         layout.addWidget(self.language_box)
         layout.addSpacing(8)
-        for button in (self.theme_button, self.minimize_button, self.maximize_button, self.close_button):
+        for button in (self.update_button, self.theme_button, self.minimize_button, self.maximize_button, self.close_button):
             layout.addWidget(button)
 
         self.minimize_button.clicked.connect(lambda: self.window().showMinimized())
@@ -132,8 +159,9 @@ class TitleBar(QWidget):
         self.maximize_button.set_kind("restore" if maximized else "maximize")
 
     def apply_palette(self, p: Palette):
-        for button in (self.theme_button, self.minimize_button, self.maximize_button):
+        for button in (self.update_button, self.theme_button, self.minimize_button, self.maximize_button):
             button.set_colors(p.text, p.tint_hover, p.tint_pressed)
+        self.update_button.set_badge(self.update_button._badge, p.accent)
         self.close_button.set_colors(p.text, p.close_hover, p.close_hover, hover_fg="#FFFFFF")
         # Show the icon of the theme the button switches to.
         self.theme_button.set_kind("sun" if p.name == "dark" else "moon")

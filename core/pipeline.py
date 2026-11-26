@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from core.analysis import analyze
+from core.analysis import analyze_separately
 from core.audio import ensure_decodable
 from core.models import AnalysisResult
 from core.outputs import plan_output
@@ -30,6 +30,7 @@ def process_song(
     on_stage: Callable[[str], None] = lambda stage: None,
     on_notice: Callable[[str], None] = lambda message: None,
     model_cached: Callable[[], bool] = is_model_cached,
+    analyzer: Callable[[Path], AnalysisResult] = analyze_separately,
 ) -> ProcessedSong:
     song = Path(song)
     ensure_decodable(song)
@@ -57,6 +58,6 @@ def process_song(
         directory=plan.directory,
         vocals=vocals,
         instrumental=instrumental,
-        analysis=analyze(song),
+        analysis=analyzer(song),
         reused=plan.reuse,
     )

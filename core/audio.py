@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import librosa
-import numpy as np
-import soundfile as sf
+if TYPE_CHECKING:
+    import numpy as np
 
 # Formats libsndfile cannot read; they go through FFmpeg.
 NEEDS_FFMPEG = {".m4a"}
@@ -22,6 +24,10 @@ def ensure_decodable(path: Path) -> None:
 
 
 def load_mono(path: Path) -> tuple[np.ndarray, int]:
+    # imported here so that opening the window does not load them (see core.analysis)
+    import librosa
+    import soundfile as sf
+
     try:
         return librosa.load(path, sr=None, mono=True)
     except sf.LibsndfileError:

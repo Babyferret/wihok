@@ -1,6 +1,7 @@
 ; Wihok installer. Build with packaging\build.ps1, which passes these defines:
 ;   AppVersion, SourceDir (the CPU build), Generated (icon and images), OutDir,
-;   CudaPackUrl, CudaPackSha256 (the optional GPU add-on for NVIDIA cards)
+;   CudaPackUrl, CudaPackSha256 (the optional GPU add-on for NVIDIA cards), TorchVersion (the PyTorch version
+;   of this build, compared with the one the installed GPU add-on carries)
 ; The base install is the CPU build and runs on any computer (AMD, Intel, no GPU).
 ; On a computer with an NVIDIA driver the installer offers to download the GPU add-on and
 ; verifies its SHA-256 before running it.
@@ -62,24 +63,41 @@ th.DeleteSettings=ลบการตั้งค่าที่วิหคบ�
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; Flags: unchecked
-Name: "cudapack"; Description: "{cm:CudaTask}"; GroupDescription: "{cm:CudaGroup}"; Check: HasNvidiaDriver
+; dontinheritcheck: an update must not re-download the add-on just because it was ticked last time. Whether the
+; installed add-on still fits is decided by the version marker (see ShouldWriteTorchFiles).
+Name: "cudapack"; Description: "{cm:CudaTask}"; GroupDescription: "{cm:CudaGroup}"; Check: HasNvidiaDriver; Flags: dontinheritcheck
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; PyTorch is a separate entry: when the GPU add-on of the same PyTorch version is already installed its files are
+; left alone, so updating the app does not turn a GPU install back into a CPU one (or into a mix of both).
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "_internal\torch\*,_internal\torchaudio\*"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\_internal\torch\*"; DestDir: "{app}\_internal\torch"; Check: ShouldWriteTorchFiles; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\_internal\torchaudio\*"; DestDir: "{app}\_internal\torchaudio"; Check: ShouldWriteTorchFiles; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
+[Registry]
+; The app reads its language from here (Qt's QSettings: Software\Wihok\Wihok, value "language"). Hand over the
+; language picked in this installer, but only if the person has no choice yet, so a language chosen inside the app
+; survives running the installer again (for example to add GPU support).
+Root: HKCU; Subkey: "Software\Wihok\Wihok"; ValueType: string; ValueName: "language"; ValueData: "{language}"; Flags: createvalueifdoesntexist
+
 [Icons]
-Name: "{autoprograms}\Wihok"; Filename: "{app}\Wihok.exe"
-Name: "{autodesktop}\Wihok"; Filename: "{app}\Wihok.exe"; Tasks: desktopicon
+; AppUserModelID must match the one the app sets for itself (main.py: Wihok.Wihok). With it, a button pinned from the
+; Start menu and the running window are the same taskbar button instead of two.
+Name: "{autoprograms}\Wihok"; Filename: "{app}\Wihok.exe"; AppUserModelID: "Wihok.Wihok"
+Name: "{autodesktop}\Wihok"; Filename: "{app}\Wihok.exe"; Tasks: desktopicon; AppUserModelID: "Wihok.Wihok"
 
 [Run]
 Filename: "{app}\Wihok.exe"; Description: "{cm:LaunchProgram,Wihok}"; Flags: nowait postinstall skipifsilent
+; An update started from inside the program (it passes /RELAUNCH=1) opens the program again when it is done.
+Filename: "{app}\Wihok.exe"; Flags: nowait runasoriginaluser; Check: RelaunchRequested
 
 [UninstallDelete]
 ; The GPU add-on is installed by a second installer, so Inno does not know its files. _internal is
 ; entirely ours (PyInstaller created it), so this removes exactly that folder and nothing else.
 Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\gpu-pack.txt"
 
 [Code]
 var
@@ -91,9 +109,55 @@ begin
   Result := FileExists(ExpandConstant('{sys}\nvcuda.dll'));
 end;
 
+// The GPU add-on writes gpu-pack.txt (the PyTorch version it carries) next to Wihok.exe.
+function GpuPackInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\gpu-pack.txt'));
+end;
+
+function GpuPackMatchesThisBuild: Boolean;
+var
+  Version: AnsiString;
+begin
+  Result := LoadStringFromFile(ExpandConstant('{app}\gpu-pack.txt'), Version) and (Trim(String(Version)) = '{#TorchVersion}');
+end;
+
+function RelaunchRequested: Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
+
+function ShouldWriteTorchFiles: Boolean;
+begin
+  Result := not GpuPackMatchesThisBuild;
+end;
+
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  // The add-on task is ticked by default, which is right for a first install. When GPU support is already there:
+  // - it fits this build: untick, or every update (an in-app update is a silent run with no /TASKS) would
+  //   download the add-on again;
+  // - it was made for another PyTorch version, so this install replaces it with the CPU libraries: tick it,
+  //   instead of leaving the person on the CPU without noticing.
+  if CurPageID = wpSelectTasks then
+  begin
+    if GpuPackInstalled then
+    begin
+      if GpuPackMatchesThisBuild then
+        WizardSelectTasks('!cudapack')
+      else if HasNvidiaDriver then
+        WizardSelectTasks('cudapack');
+    end
+    else if RelaunchRequested then
+      // An update started from inside the program never adds GPU support the person did not have: they may have
+      // declined it, or its download may have failed once. It stays one click away in the installer itself.
+      WizardSelectTasks('!cudapack');
+  end;
 end;
 
 // Inno reports every download failure as "Internal error: Worker thread terminated unexpectedly ...".
@@ -164,6 +228,10 @@ var
   ResultCode: Integer;
   Pack: String;
 begin
+  // The CPU libraries just replaced the old GPU ones, so the old marker no longer tells the truth.
+  if (CurStep = ssPostInstall) and GpuPackInstalled and not GpuPackMatchesThisBuild then
+    DeleteFile(ExpandConstant('{app}\gpu-pack.txt'));
+
   // The download itself happens in NextButtonClick (wizard page and silent installs alike). If it fails or
   // the SHA-256 does not match, setup stops there, so by now the add-on is present and verified.
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('cudapack') then

@@ -11,9 +11,24 @@ ASSETS = Path(__file__).parent / "assets"
 
 def run_demucs_worker(arguments: list[str]) -> int:
     """Packaged builds run separation by starting this program again with --demucs (see core.separator)."""
-    from demucs.separate import main as demucs_main
+    import traceback
 
-    demucs_main(arguments)
+    # Demucs prints the song's path. Whatever the Windows code page is, write UTF-8: cp1252 cannot encode a
+    # Thai or Japanese name. (A packaged build may also ignore PYTHONIOENCODING, so do it here as well.)
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        from demucs.separate import main as demucs_main
+
+        demucs_main(arguments)
+    except SystemExit:
+        raise
+    except BaseException:
+        # Report on stderr, where the app reads it. Without this a windowed build pops up an
+        # "Unhandled exception" dialog in the middle of the user's work.
+        traceback.print_exc()
+        return 1
     return 0
 
 
@@ -37,6 +52,10 @@ def run_selftest(report_path: str) -> int:
         report["torch"] = torch.__version__
         report["cuda"] = torch.cuda.is_available()
         report["font_file_present"] = FONT_FILE.exists()
+        from core.model import _older_file_names, is_model_cached
+
+        report["model_cached"] = is_model_cached()
+        report["older_model_file_names"] = _older_file_names()  # proves Demucs' file list is inside the build
         report["ffmpeg_on_path"] = shutil.which("ffmpeg") is not None
         sr = 44100
         clicks = np.zeros(sr * 12, dtype="float32")
@@ -63,6 +82,14 @@ def main() -> int:
         return run_demucs_worker(sys.argv[2:])
     if len(sys.argv) > 2 and sys.argv[1] == "--selftest":
         return run_selftest(sys.argv[2])
+    if len(sys.argv) > 2 and sys.argv[1] == "--analyze":
+        from core.analysis import run_job
+
+        return run_job(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "--device":
+        from core.device import print_device
+
+        return print_device()
     if sys.platform == "win32":
         # Without this the taskbar groups the window under python.exe and shows its icon.
         import ctypes
